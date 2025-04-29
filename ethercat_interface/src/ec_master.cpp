@@ -96,13 +96,14 @@ void EcMaster::addSlave(uint16_t alias, uint16_t position, EcSlave * slave)
   if (slave->assign_activate_dc_sync()) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    ecrt_master_application_time(master_, EC_NEWTIMEVAL2NANO(t));
+   // ecrt_master_application_time(master_, EC_NEWTIMEVAL2NANO(t));
     ecrt_slave_config_dc(
       slave_info.config,
       slave->assign_activate_dc_sync(),
       interval_,
-      interval_ - (t.tv_nsec % (interval_)),
       0,
+//      interval_ - (t.tv_nsec % (interval_)),
+      interval_,
       0);
   }
 
@@ -234,7 +235,7 @@ bool EcMaster::activate()
   // set application time
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
-  ecrt_master_application_time(master_, EC_NEWTIMEVAL2NANO(t));
+  //ecrt_master_application_time(master_, EC_NEWTIMEVAL2NANO(t));
 
   // activate master
   bool activate_status = ecrt_master_activate(master_);
@@ -271,7 +272,7 @@ void EcMaster::update(uint32_t domain)
   ecrt_domain_process(domain_info->domain);
 
   // check process data state (optional)
-  checkDomainState(domain);
+  // checkDomainState(domain);
 
   // check for master and slave state change
   if (update_counter_ % check_state_frequency_ == 0) {
@@ -313,12 +314,16 @@ void EcMaster::readData(uint32_t domain)
   ecrt_domain_process(domain_info->domain);
 
   // check process data state (optional)
-  checkDomainState(domain);
+  // checkDomainState(domain);
 
   // check for master and slave state change
   if (update_counter_ % check_state_frequency_ == 0) {
     checkMasterState();
     checkSlaveStates();
+    clock_gettime(CLOCK_TO_USE, &startTime);
+    period_ns = DIFF_NS(lastStartTime, startTime);
+    lastStartTime = startTime; 
+    printf("Average cycle:  %10u\n", period_ns/check_state_frequency_);
   }
 
   // read and write process data
@@ -376,18 +381,71 @@ void EcMaster::run(SIMPLECAT_CONTRL_CALLBACK user_callback)
 
   running_ = true;
   start_t_ = std::chrono::system_clock::now();
+  
+  static unsigned int counter = 0;
+  
+  clock_gettime(CLOCK_TO_USE, &wakeupTime);
+  
   while (running_) {
+    wakeupTime = timespec_add(wakeupTime, cycletime);
+
     // wait until next shot
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, NULL);
 
+    clock_gettime(CLOCK_TO_USE, &startTime);
+    latency_ns = DIFF_NS(wakeupTime, startTime);
+    period_ns = DIFF_NS(lastStartTime, startTime);
+    exec_ns = DIFF_NS(lastStartTime, endTime);
+    lastStartTime = startTime;
+
+    if (latency_ns > latency_max_ns) {
+        latency_max_ns = latency_ns;
+    }
+    if (latency_ns < latency_min_ns) {
+        latency_min_ns = latency_ns;
+    }
+    if (period_ns > period_max_ns) {
+        period_max_ns = period_ns;
+    }
+    if (period_ns < period_min_ns) {
+        period_min_ns = period_ns;
+    }
+    if (exec_ns > exec_max_ns) {
+        exec_max_ns = exec_ns;
+    }
+    if (exec_ns < exec_min_ns) {
+        exec_min_ns = exec_ns;
+    }
+//#endif
+    // double dt = period_ns/1000000000.0; //exec time to second
+  
+    if (counter) {
+        counter--;
+        } else { // do this at 1 Hz
+        counter = FREQUENCY;
+        // printWarning("peripd min " + std::to_string(period_min_ns) + " period max: " + std::to_string(period_max_ns));
+        std::cout << "period min: " << period_min_ns << " period max: " << period_max_ns << std::endl;
+        std::cout << "exec min: " << exec_min_ns << " exec max: " << exec_max_ns << std::endl;
+        std::cout << "latency min: " << latency_min_ns << " latency max: " << latency_max_ns << std::endl;
+        // printf("period     %10u ... %10u\n", period_min_ns, period_max_ns);
+        // printf("exec       %10u ... %10u\n", exec_min_ns, exec_max_ns); 
+        // printf("latency    %10u ... %10u\n", latency_min_ns, latency_max_ns);
+        period_max_ns = 0;
+        period_min_ns = 0xffffffff;
+        exec_max_ns = 0;
+        exec_min_ns = 0xffffffff;
+        latency_max_ns = 0;
+        latency_min_ns = 0xffffffff;
+        }
+
     // update EtherCAT bus
     this->update();
-
-    // get actual time
+    // get actual time    
     curr_t_ = std::chrono::system_clock::now();
 
     // user callback
     user_callback();
+    clock_gettime(CLOCK_TO_USE, &endTime);
 
     // calculate next shot. carry over nanoseconds into microseconds.
     t.tv_nsec += interval_;

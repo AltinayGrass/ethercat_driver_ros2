@@ -25,6 +25,15 @@
 #include "ethercat_interface/ec_slave.hpp"
 
 
+#define FREQUENCY 500
+#define CLOCK_TO_USE CLOCK_REALTIME
+#define NSEC_PER_SEC (1000000000L)
+#define PERIOD_NS (NSEC_PER_SEC / FREQUENCY)
+
+#define DIFF_NS(A, B) (((B).tv_sec - (A).tv_sec) * NSEC_PER_SEC + (B).tv_nsec - (A).tv_nsec)
+
+#define TIMESPEC2NS(T) ((uint64_t) (T).tv_sec * NSEC_PER_SEC + (T).tv_nsec)
+
 namespace ethercat_interface
 {
 
@@ -91,6 +100,16 @@ public:
   void writeData(uint32_t domain = 0);
 
 private:
+
+const struct timespec cycletime = {0, PERIOD_NS};
+
+struct timespec wakeupTime;
+struct timespec startTime, endTime, lastStartTime = {};
+uint32_t period_ns = 0, exec_ns = 0, latency_ns = 0,
+         latency_min_ns = 0, latency_max_ns = 0,
+         period_min_ns = 0, period_max_ns = 0,
+         exec_min_ns = 0, exec_max_ns = 0;
+
   /** true if running */
   volatile bool running_ = false;
 
@@ -160,6 +179,21 @@ private:
     ec_slave_config_state_t config_state = {0};
   };
 
+  struct timespec timespec_add(struct timespec time1, struct timespec time2)
+{
+    struct timespec result;
+
+    if ((time1.tv_nsec + time2.tv_nsec) >= NSEC_PER_SEC) {
+        result.tv_sec = time1.tv_sec + time2.tv_sec + 1;
+        result.tv_nsec = time1.tv_nsec + time2.tv_nsec - NSEC_PER_SEC;
+    } else {
+        result.tv_sec = time1.tv_sec + time2.tv_sec;
+        result.tv_nsec = time1.tv_nsec + time2.tv_nsec;
+    }
+
+    return result;
+};
+
   std::vector<SlaveInfo> slave_info_;
 
   /** counter of control loops */
@@ -167,7 +201,7 @@ private:
 
   /** frequency to check for master or slave state change.
    *  state checked every frequency_ control loops */
-  uint32_t check_state_frequency_ = 10;
+  uint32_t check_state_frequency_ = 500;
 
   uint32_t interval_;
 };
