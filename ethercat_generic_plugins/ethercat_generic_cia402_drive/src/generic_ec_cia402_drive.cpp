@@ -186,7 +186,7 @@ DeviceState EcCiA402Drive::deviceState(uint16_t status_word)
     return STATE_QUICK_STOP_ACTIVE;
   } else if ((status_word & 0b01001111) == 0b00001111) {
     return STATE_FAULT_REACTION_ACTIVE;
-  } else if ((status_word & 0b01001111) == 0b00001000) {
+  } else if ((status_word & 0b00001000)) {
     return STATE_FAULT;
   }
   return STATE_UNDEFINED;
